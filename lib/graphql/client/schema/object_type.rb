@@ -32,7 +32,7 @@ module GraphQL
             define_fields(fields)
 
             if definition.client.enforce_collocated_callers
-              Client.enforce_collocated_callers(self, fields.keys, definition.source_location[0])
+              Client.enforce_collocated_callers(self, fields.keys, [definition.source_location[0]])
             end
 
             class << self

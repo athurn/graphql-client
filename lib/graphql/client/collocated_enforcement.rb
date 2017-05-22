@@ -3,10 +3,6 @@ require "graphql/client/error"
 
 module GraphQL
   class Client
-
-    # Collcation will not be enforced if a stack trace includes any of these gems.
-    WHITELISTED_GEM_NAMES = %w{pry byebug}
-
     # Raised when method is called from outside the expected file scope.
     class NonCollocatedCallerError < Error; end
 
@@ -20,23 +16,37 @@ module GraphQL
         Thread.current[:query_result_caller_location_ignore] = nil
       end
 
+      # Collcation will not be enforced if a stack trace includes any of these gems.
+      WHITELISTED_DEBUGGING_LOCATIONS = /gems\/pry|gems\/byebug/
+
+      # Internal: Check if called from debugger library.
+      #
+      # locations - Array of caller location Thread::Backtrace::Locations
+      #
+      # Returns true if enforcement should be ignored.
+      def self.allowed_debugging_call?(locations)
+        locations.any? do |location|
+          location.path =~ WHITELISTED_DEBUGGING_LOCATIONS
+        end
+      end
+
       # Internal: Decorate method with collocated caller enforcement.
       #
       # mod - Target Module/Class
       # methods - Array of Symbol method names
-      # path - String filename to assert calling from
+      # paths - Array of String filenames to assert calling from
       #
       # Returns nothing.
-      def enforce_collocated_callers(mod, methods, path)
+      def enforce_collocated_callers(mod, methods, paths)
+        paths = Set.new(Array(paths))
+
         mod.prepend(Module.new do
           methods.each do |method|
             define_method(method) do |*args, &block|
               return super(*args, &block) if Thread.current[:query_result_caller_location_ignore]
 
-              locations = caller_locations(1, 1)
-
-              if (locations.first.path != path) && !(caller_locations.any? { |cl| WHITELISTED_GEM_NAMES.any? { |g| cl.path.include?("gems/#{g}") } })
-                error = NonCollocatedCallerError.new("#{method} was called outside of '#{path}' https://git.io/v1syX")
+              if !paths.include?(caller_locations(1, 1)[0].path) && !CollocatedEnforcement.allowed_debugging_call?(caller_locations(1, 5))
+                error = NonCollocatedCallerError.new("#{method} was called outside of '#{paths.to_a.join(", ")}' https://git.io/v1syX")
                 error.set_backtrace(caller(1))
                 raise error
               end
